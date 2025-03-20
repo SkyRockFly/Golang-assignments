@@ -1,11 +1,15 @@
 package main
 
 import (
-	"fmt"
 	"sort"
 	"strconv"
 	"sync"
+
+	"github.com/rs/zerolog/log"
 )
+
+const singleHash_maxGoroutines = 20
+const multiHash_maxGoroutines = 100
 
 func SingleHash(in, out chan interface{}) {
 	var mu sync.Mutex
@@ -15,19 +19,25 @@ func SingleHash(in, out chan interface{}) {
 
 		var data string
 
+		threads := make(chan struct{}, singleHash_maxGoroutines)
+
 		switch t := rawData.(type) {
 		case string:
 			data = t
 		case int:
 			data = strconv.Itoa(t)
 		default:
-			fmt.Println("Invalid data")
+			log.Info().Interface("data:", data).
+				Msg("Invalid data")
 			continue
 		}
 
 		waiter.Add(1)
 
 		go func(data string) {
+
+			threads <- struct{}{}
+			defer func() { <-threads }()
 
 			var crcHash, md5crcHash string
 			var wg sync.WaitGroup
@@ -54,6 +64,8 @@ func SingleHash(in, out chan interface{}) {
 
 			singleHash := crcHash + "~" + md5crcHash
 
+			log.Info().Str("SingleHash", singleHash).Msg("SingleHash output")
+
 			out <- singleHash
 
 			waiter.Done()
@@ -68,6 +80,7 @@ func SingleHash(in, out chan interface{}) {
 
 func MultiHash(in, out chan interface{}) {
 	var wg, waiter sync.WaitGroup
+	threads := make(chan struct{}, multiHash_maxGoroutines)
 	for data := range in {
 		waiter.Add(1)
 		data := data.(string)
@@ -75,10 +88,17 @@ func MultiHash(in, out chan interface{}) {
 		go func(data string) {
 			hashArr := make([]string, 6)
 
+			threads <- struct{}{}
+			defer func() { <-threads }()
+
 			for i := 0; i < 6; i++ {
 				wg.Add(1)
 				go func(i int) {
 					hashArr[i] = DataSignerCrc32(strconv.Itoa(i) + data)
+					log.Info().Str("Input data", data).
+						Int("hashArr iteration", i).
+						Str("hasharr[i]", hashArr[i]).
+						Msg("HashArrp[i] iteration value")
 					wg.Done()
 
 				}(i)
@@ -94,6 +114,8 @@ func MultiHash(in, out chan interface{}) {
 				multiHash += output
 
 			}
+
+			log.Info().Str("Input data", data).Str("MultiHash", multiHash).Msg("MultiHash value")
 
 			out <- multiHash
 
@@ -153,33 +175,3 @@ func ExecutePipeline(jobs ...job) {
 	wg.Wait()
 
 }
-
-/*func main() {
-	inputData := []int{0, 1}
-
-	hashJobs := []job{
-		job(func(in, out chan interface{}) {
-			for _, fibNum := range inputData {
-				out <- fibNum
-			}
-
-		}),
-		job(SingleHash),
-		job(MultiHash),
-		job(CombineResults),
-		job(func(in, out chan interface{}) {
-			dataRaw := <-in
-			data, ok := dataRaw.(string)
-			if !ok {
-				fmt.Println("cant convert result data to string")
-			}
-			fmt.Println(data)
-		}),
-	}
-
-	ExecutePipeline(hashJobs...)
-
-}
-*/
-
-// сюда писать код
