@@ -3,6 +3,7 @@ package main
 import (
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/rs/zerolog/log"
@@ -11,9 +12,10 @@ import (
 const singleHash_maxGoroutines = 20
 const multiHash_maxGoroutines = 100
 
-func SingleHash(in, out chan interface{}) {
+func SingleHash(in, out chan any) {
 	var mu sync.Mutex
 	var waiter sync.WaitGroup
+	var singleHash strings.Builder
 
 	for rawData := range in {
 
@@ -62,11 +64,13 @@ func SingleHash(in, out chan interface{}) {
 
 			wg.Wait()
 
-			singleHash := crcHash + "~" + md5crcHash
+			singleHash.WriteString(crcHash)
+			singleHash.WriteString("~")
+			singleHash.WriteString(md5crcHash)
 
-			log.Info().Str("SingleHash", singleHash).Msg("SingleHash output")
+			log.Info().Str("SingleHash", singleHash.String()).Msg("SingleHash output")
 
-			out <- singleHash
+			out <- singleHash.String()
 
 			waiter.Done()
 
@@ -78,7 +82,7 @@ func SingleHash(in, out chan interface{}) {
 
 }
 
-func MultiHash(in, out chan interface{}) {
+func MultiHash(in, out chan any) {
 	var wg, waiter sync.WaitGroup
 	threads := make(chan struct{}, multiHash_maxGoroutines)
 	for data := range in {
@@ -93,15 +97,15 @@ func MultiHash(in, out chan interface{}) {
 
 			for i := 0; i < 6; i++ {
 				wg.Add(1)
-				go func(i int) {
+				go func() {
 					hashArr[i] = DataSignerCrc32(strconv.Itoa(i) + data)
 					log.Info().Str("Input data", data).
 						Int("hashArr iteration", i).
 						Str("hasharr[i]", hashArr[i]).
-						Msg("HashArrp[i] iteration value")
+						Msg("HashArr[i] iteration value")
 					wg.Done()
 
-				}(i)
+				}()
 
 			}
 
@@ -129,7 +133,7 @@ func MultiHash(in, out chan interface{}) {
 
 }
 
-func CombineResults(in, out chan interface{}) {
+func CombineResults(in, out chan any) {
 	hashes := make([]string, 0)
 	for data := range in {
 		data := data.(string)
@@ -156,13 +160,13 @@ func CombineResults(in, out chan interface{}) {
 
 func ExecutePipeline(jobs ...job) {
 	var wg sync.WaitGroup
-	input := make(chan interface{})
+	input := make(chan any)
 
 	for _, worker := range jobs {
-		output := make(chan interface{})
+		output := make(chan any)
 
 		wg.Add(1)
-		go func(work job, in chan interface{}, out chan interface{}) {
+		go func(work job, in chan any, out chan any) {
 			defer wg.Done()
 			defer close(out)
 			work(in, out)
